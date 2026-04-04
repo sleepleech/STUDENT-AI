@@ -29,22 +29,52 @@ export async function POST(req: Request) {
     // ===== 1. YOUTUBE =====
     const youtubeUrl = formData.get('youtubeUrl') as string;
     if (youtubeUrl) {
-      console.log("📺 Analyzing Youtube Video:", youtubeUrl);
+      console.log("📺 Strategy 1 - Try youtube-transcript:", youtubeUrl);
+
+      // Strategy 1: Try fast subtitle fetch first (works on videos with CC/auto-subs)
       try {
-        const transcriptList = await YoutubeTranscript.fetchTranscript(youtubeUrl);
+        const transcriptList = await YoutubeTranscript.fetchTranscript(youtubeUrl, {
+          lang: 'id', // Prefer Indonesian subtitle
+        }).catch(() => YoutubeTranscript.fetchTranscript(youtubeUrl)); // fallback to any language
+
         const text = transcriptList.map(t => t.text).join(' ');
-        if (!text) throw new Error("Video ini tidak memiliki subtitle/transkrip. Coba video lain!");
-        return NextResponse.json({ success: true, text, type: "youtube" });
-      } catch (ytErr: any) {
-        const msg = ytErr?.message || '';
-        if (msg.includes('Transcript is disabled') || msg.includes('disabled')) {
-          throw new Error("❌ Video ini tidak memiliki transkrip/subtitle yang bisa diakses. Coba video YouTube lain yang memiliki CC (closed caption).");
+        if (text && text.trim().length > 20) {
+          console.log("✅ Transcript fetched via subtitle track.");
+          return NextResponse.json({ success: true, text, type: "youtube" });
         }
-        if (msg.includes('Could not retrieve') || msg.includes('not found')) {
-          throw new Error("❌ Video tidak ditemukan atau bersifat privat. Pastikan URL YouTube valid dan video bersifat publik.");
-        }
-        throw new Error(`❌ Gagal mengambil transkrip YouTube: ${msg}`);
+      } catch (_) {
+        console.log("⚠️ No subtitle track. Falling back to Gemini video understanding...");
       }
+
+      // Strategy 2: Use Gemini's native YouTube video understanding (no subtitle needed!)
+      // Gemini 2.0 Flash can directly "watch" and understand YouTube videos
+      console.log("📺 Strategy 2 - Gemini native YouTube analysis...");
+      const apiKey = getRandomGeminiKey();
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+
+      const ytPrompt = `Kamu adalah asisten belajar AI. Tonton video YouTube ini dan lakukan hal berikut:
+1. Transkripsi semua yang dibicarakan secara lengkap (dalam Bahasa Indonesia).
+2. Jika pembicaraan dalam bahasa lain, terjemahkan ke Bahasa Indonesia.
+3. Tulis secara rapi dan urut sesuai alur video.
+Jangan tambahkan opini, hanya isi konten yang dibicarakan di video ini.`;
+
+      const result = await model.generateContent([
+        { text: ytPrompt },
+        {
+          fileData: {
+            mimeType: "video/mp4",
+            fileUri: youtubeUrl,
+          }
+        }
+      ]);
+
+      const text = result.response.text();
+      if (!text || text.trim().length < 20) {
+        throw new Error("❌ Video tidak dapat diproses. Pastikan video bersifat publik dan dapat diakses.");
+      }
+
+      return NextResponse.json({ success: true, text, type: "youtube" });
     }
 
     // ===== 2. TEXT (dari Tulis Catatan) =====
