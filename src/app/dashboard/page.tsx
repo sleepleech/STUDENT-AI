@@ -87,28 +87,28 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="flex flex-col gap-7 w-full max-w-4xl mx-auto pb-10 pt-4">
+    <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto pb-10 pt-4 px-4 md:px-0">
 
       {/* Greeting - CENTERED */}
-      <div className="flex flex-col items-center text-center mb-8">
-        <h1 className="text-3xl font-black text-foreground flex items-center justify-center gap-2 mb-2">Halo, Pelajar! 👋</h1>
-        <p className="text-sm text-muted-foreground/80 font-medium">
+      <div className="flex flex-col items-center text-center mb-4 md:mb-8">
+        <h1 className="text-2xl md:text-3xl font-black text-foreground flex items-center justify-center gap-2 mb-2">Halo, Pelajar! 👋</h1>
+        <p className="text-xs md:text-sm text-muted-foreground/80 font-medium">
           {new Date().toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
         </p>
       </div>
 
-      {/* Stats Row - CENTERED */}
-      <div className="flex flex-wrap items-center justify-center gap-4 mb-4">
+      {/* Stats Row - RESPONSIVE GRID */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-4">
         {stats.map((s) => {
           const Icon = s.icon;
           return (
-            <div key={s.label} className="bg-card/40 backdrop-blur-md border border-border/50 rounded-3xl p-4 flex flex-col items-center text-center min-w-[140px] hover:border-primary/30 transition-colors">
-              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center mb-3 ${s.bg}`}>
-                <Icon size={18} className={s.color} />
+            <div key={s.label} className="bg-card/40 backdrop-blur-md border border-border/50 rounded-3xl p-3 md:p-4 flex flex-col items-center text-center hover:border-primary/30 transition-colors">
+              <div className={`w-8 h-8 md:w-10 md:h-10 rounded-xl md:rounded-2xl flex items-center justify-center mb-2 md:mb-3 ${s.bg}`}>
+                <Icon size={16} className={s.color} />
               </div>
-              <p className="text-xs text-muted-foreground/80 font-medium mb-1">{s.label}</p>
-              <p className="text-lg font-black text-foreground">{s.value}</p>
-              <p className="text-[10px] text-muted-foreground mt-1">{s.sub}</p>
+              <p className="text-[10px] md:text-xs text-muted-foreground/80 font-medium mb-0.5 md:mb-1">{s.label}</p>
+              <p className="text-sm md:text-lg font-black text-foreground">{s.value}</p>
+              <p className="text-[8px] md:text-[10px] text-muted-foreground mt-0.5 md:mt-1">{s.sub}</p>
             </div>
           );
         })}

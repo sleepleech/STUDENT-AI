@@ -1,5 +1,5 @@
 "use client";
-import { Bell, Search, User, Zap } from "lucide-react";
+import { Bell, Search, User, Zap, Menu } from "lucide-react";
 import { motion } from "framer-motion";
 import { useGameStore, getBelt, getXPForNextBelt } from "@/store/useGameStore";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -10,7 +10,15 @@ export function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
   const belt = getBelt(xp);
   const xpProgress = getXPForNextBelt(xp);
   return (
-    <header className="h-14 border-b border-border bg-background/70 backdrop-blur-xl sticky top-0 z-40 flex items-center justify-between px-5">
+    <header className="h-14 border-b border-border bg-background/70 backdrop-blur-xl sticky top-0 z-40 flex items-center justify-between px-4 md:px-5">
+      {/* Mobile Menu Toggle */}
+      <button 
+        onClick={onMenuClick}
+        className="p-2 -ml-2 mr-2 hover:bg-accent rounded-xl text-muted-foreground hover:text-foreground md:hidden transition-colors"
+      >
+        <Menu size={20} />
+      </button>
+
       {/* Search */}
       <div className="relative hidden md:block">
         <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />

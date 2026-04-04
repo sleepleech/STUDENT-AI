@@ -24,17 +24,17 @@ export default function AboutPage() {
       <div className="absolute inset-0 bg-black/10 z-0" />
 
       {/* Header / Top Right Branding */}
-      <header className="absolute top-0 w-full px-8 py-8 z-20 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2 text-white/70 hover:text-white transition-colors uppercase text-xs font-bold tracking-widest">
-          <ArrowLeft size={16} /> Home
+      <header className="absolute top-0 w-full px-4 md:px-8 py-6 md:py-8 z-20 flex items-center justify-between">
+        <Link href="/" className="flex items-center gap-2 text-white/70 hover:text-white transition-colors uppercase text-[10px] md:text-xs font-bold tracking-widest">
+          <ArrowLeft size={14} /> Home
         </Link>
-        <a href="https://instagram.com/faqihwhy113" target="_blank" rel="noreferrer" className="text-xs font-medium tracking-widest text-white/90 hover:text-primary transition-colors">
-          Instagram.com/faqihwhy113
+        <a href="https://instagram.com/faqihwhy113" target="_blank" rel="noreferrer" className="text-[10px] md:text-xs font-medium tracking-widest text-white/90 hover:text-primary transition-colors">
+          @faqihwhy113
         </a>
       </header>
 
       {/* Main UI Overlay - "CHARACTER SELECT" Layout */}
-      <main className="relative z-10 w-full h-full flex items-center justify-between px-8 md:px-16 lg:px-24">
+      <main className="relative z-10 w-full h-full flex items-center justify-between px-6 md:px-16 lg:px-24">
         
         {/* Left Panel - Hero Info */}
         <motion.div 
@@ -43,7 +43,7 @@ export default function AboutPage() {
           transition={{ duration: 1, ease: "easeOut" }}
           className="w-full md:w-2/5 flex flex-col justify-center"
         >
-          <h1 className="text-5xl lg:text-7xl font-black leading-[1.1] tracking-tight mb-4 uppercase drop-shadow-xl text-white">
+          <h1 className="text-4xl sm:text-5xl lg:text-7xl font-black leading-[1.1] tracking-tight mb-4 uppercase drop-shadow-xl text-white">
             TENTANG <br /> SENSEI
           </h1>
           

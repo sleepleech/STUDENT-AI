@@ -86,28 +86,23 @@ export default function LoginPage() {
       </video>
 
       {/* Top Navigation */}
-      <header className="absolute top-0 w-full px-8 py-6 z-20 flex flex-col md:flex-row items-center justify-between gap-4">
+      <header className="absolute top-0 w-full px-6 md:px-8 py-4 md:py-6 z-20 flex items-center justify-between gap-4">
         {/* Left: Branding */}
-        <div className="flex flex-col items-center md:items-start text-white/90">
-          <Sparkles size={32} className="mb-1 text-white" />
-          <span className="text-sm font-bold leading-tight">Nata<br/>Sensei</span>
+        <div className="flex items-center gap-3 text-white/90">
+          <Sparkles size={24} className="text-white" />
+          <span className="text-[10px] md:text-sm font-bold leading-tight uppercase tracking-tighter">Nata<br/>Sensei</span>
         </div>
 
         {/* Center: Tabs */}
-        <div className="flex items-center gap-8 text-sm font-bold uppercase tracking-widest bg-white/5 backdrop-blur-md px-6 py-2 rounded-xl border border-white/10">
-          <Link href="/" className="flex items-center gap-2 hover:text-orange-400 transition-colors">
-            <Home size={16} /> Home
-          </Link>
-          <Link href="/about" className="flex items-center gap-2 hover:text-orange-400 transition-colors">
-            <LogIn size={16} /> About
-          </Link>
+        <div className="flex items-center gap-4 md:gap-8 text-[10px] md:text-sm font-bold uppercase tracking-widest bg-white/5 backdrop-blur-md px-4 md:px-6 py-2 rounded-xl border border-white/10">
+          <Link href="/" className="hover:text-orange-400 transition-colors">Home</Link>
+          <Link href="/about" className="hover:text-orange-400 transition-colors">About</Link>
         </div>
 
         {/* Right: Language (Dummy to match UI) */}
-        <div className="hidden md:flex flex-col text-[10px] font-bold text-white/50 items-end gap-1">
+        <div className="hidden lg:flex flex-col text-[10px] font-bold text-white/50 items-end gap-1">
           <span className="hover:text-white cursor-pointer transition-colors">RU</span>
-          <span className="hover:text-white cursor-pointer transition-colors">FR</span>
-          <span className="text-white flex items-center gap-1 cursor-pointer"><ArrowRightSmall /> EN</span>
+          <span className="text-white flex items-center gap-1 cursor-pointer"> EN</span>
         </div>
       </header>
 
@@ -246,7 +241,7 @@ export default function LoginPage() {
                 {/* Action Button */}
                 <button 
                   type="submit"
-                  className="w-max px-10 py-3 bg-gradient-to-r from-orange-500 to-orange-400 hover:from-orange-400 hover:to-orange-500 text-white font-black text-sm uppercase tracking-wider rounded-lg transition-all shadow-[0_0_20px_rgba(249,115,22,0.4)] mt-6"
+                  className="w-full sm:w-max px-10 py-3 bg-gradient-to-r from-orange-500 to-orange-400 hover:from-orange-400 hover:to-orange-500 text-white font-black text-sm uppercase tracking-wider rounded-lg transition-all shadow-[0_0_20px_rgba(249,115,22,0.4)] mt-6"
                 >
                   {isLoginView ? "Login" : "Create Account"}
                 </button>

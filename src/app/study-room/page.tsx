@@ -34,19 +34,19 @@ export default function StudyRoomPage() {
 
   if (!activeMaterial) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center">
-        <div className="w-20 h-20 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center purple-glow">
-          <BookOpen size={36} className="text-primary" />
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center px-4">
+        <div className="w-16 h-16 md:w-20 md:h-20 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center purple-glow">
+          <BookOpen size={30} className="text-primary" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-foreground mb-2">Ruang Belajar Kosong</h1>
-          <p className="text-muted-foreground text-sm max-w-xs">
+          <h1 className="text-xl md:text-2xl font-bold text-foreground mb-2">Ruang Belajar Kosong</h1>
+          <p className="text-muted-foreground text-xs md:text-sm max-w-xs px-4">
             Upload materi dari Dashboard dulu agar Nata Sensei bisa menyiapkan modul belajarmu!
           </p>
         </div>
         <Link
           href="/"
-          className="flex items-center gap-2 bg-primary text-white font-semibold px-6 py-3 rounded-2xl hover:bg-primary/90 transition-all purple-glow"
+          className="flex items-center gap-2 bg-primary text-white font-semibold px-5 py-2.5 md:px-6 md:py-3 rounded-2xl hover:bg-primary/90 transition-all purple-glow text-sm"
         >
           <Upload size={16} /> Upload Materi
         </Link>
@@ -57,7 +57,7 @@ export default function StudyRoomPage() {
   const { summary, flashcards, quiz } = activeMaterial;
 
   return (
-    <div className="flex flex-col w-full max-w-5xl mx-auto pb-20">
+    <div className="flex flex-col w-full max-w-5xl mx-auto pb-20 px-4 md:px-0">
 
       {/* Header */}
       <div className="flex items-center gap-4 mb-6">
@@ -89,7 +89,7 @@ export default function StudyRoomPage() {
       </div>
 
       {/* Tabs Navigation */}
-      <div className="flex p-1 bg-accent/50 rounded-2xl border border-border mb-6 overflow-x-auto gap-1">
+      <div className="flex p-1 bg-accent/50 rounded-2xl border border-border mb-6 overflow-x-auto gap-1 no-scrollbar lg:justify-center">
         {tabs.map((t) => {
           const Icon = t.icon;
           const isActive = tab === t.id;
@@ -97,14 +97,14 @@ export default function StudyRoomPage() {
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap flex-1 justify-center ${
+              className={`flex items-center gap-2 px-3 py-2 md:px-4 md:py-2.5 rounded-xl text-xs md:text-sm font-semibold transition-all whitespace-nowrap flex-1 lg:flex-none justify-center ${
                 isActive
                   ? "bg-card shadow-sm text-foreground border border-border"
                   : "text-muted-foreground hover:text-foreground hover:bg-accent"
               }`}
             >
-              <Icon size={15} className={isActive ? t.color : ""} />
-              <span className="hidden sm:inline">{t.label}</span>
+              <Icon size={14} className={isActive ? t.color : ""} />
+              <span>{t.label}</span>
             </button>
           );
         })}

@@ -39,7 +39,11 @@ export function Sidebar({ open, setOpen }: { open: boolean, setOpen: (open: bool
     <motion.aside
       animate={{ width: open ? 230 : 72 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      className="h-screen bg-sidebar border-r border-sidebar-border flex flex-col justify-between py-5 sticky top-0 overflow-hidden"
+      className={cn(
+        "h-screen bg-sidebar border-r border-sidebar-border flex flex-col justify-between py-5 overflow-hidden transition-all",
+        // Desktop uses width animation, mobile is handled by MainLayout transform
+        "md:sticky md:top-0"
+      )}
     >
       {/* Logo */}
       <div>
@@ -78,6 +82,10 @@ export function Sidebar({ open, setOpen }: { open: boolean, setOpen: (open: bool
               <Link
                 key={menu.name}
                 href={menu.path}
+                onClick={() => {
+                  // Close sidebar on mobile after clicking a link
+                  if (window.innerWidth < 768) setOpen(false);
+                }}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative",
                   isActive

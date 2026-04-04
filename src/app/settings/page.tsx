@@ -79,7 +79,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="w-full max-w-2xl mx-auto pb-20 pt-4">
+    <div className="w-full max-w-2xl mx-auto pb-20 pt-4 px-4 md:px-0">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-foreground">Pengaturan Akun</h1>
