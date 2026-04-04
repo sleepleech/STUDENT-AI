@@ -9,6 +9,7 @@ export interface User {
   status: 'active' | 'pending' | 'suspended';
   joined: string;
   avatar?: string;
+  password?: string;
 }
 
 interface AuthState {
@@ -16,7 +17,7 @@ interface AuthState {
   users: User[];
   login: (email: string, role: 'admin' | 'student', name?: string) => void;
   logout: () => void;
-  register: (name: string, email: string) => void;
+  register: (name: string, email: string, password?: string) => void;
   toggleUserStatus: (id: string) => void;
   deleteUser: (id: string) => void;
   updateProfile: (updates: { avatar?: string; password?: string }) => void;
@@ -57,7 +58,7 @@ export const useAuthStore = create<AuthState>()(
         set({ user: null });
       },
 
-      register: (name, email) => set((state) => {
+      register: (name, email, password) => set((state) => {
         const newUser: User = {
           id: `${Date.now()}`,
           name,
@@ -65,6 +66,7 @@ export const useAuthStore = create<AuthState>()(
           role: 'student',
           status: 'pending',
           joined: new Date().toISOString().slice(0, 10),
+          password,
         };
         return { users: [newUser, ...state.users] };
       }),

@@ -2,6 +2,18 @@ import { NextResponse } from 'next/server';
 import { YoutubeTranscript } from 'youtube-transcript';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+// Increase body size limit for Vercel (allow up to 10MB)
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '10mb',
+    },
+  },
+};
+
+// Vercel Edge: increase payload size for Next.js App Router
+export const maxDuration = 60; // seconds
+
 // Multi-Key Rotation
 function getRandomGeminiKey(): string {
   const keysEnv = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
@@ -18,10 +30,21 @@ export async function POST(req: Request) {
     const youtubeUrl = formData.get('youtubeUrl') as string;
     if (youtubeUrl) {
       console.log("📺 Analyzing Youtube Video:", youtubeUrl);
-      const transcriptList = await YoutubeTranscript.fetchTranscript(youtubeUrl);
-      const text = transcriptList.map(t => t.text).join(' ');
-      if (!text) throw new Error("Video ini tidak memiliki subtitle/transkrip. Coba video lain!");
-      return NextResponse.json({ success: true, text, type: "youtube" });
+      try {
+        const transcriptList = await YoutubeTranscript.fetchTranscript(youtubeUrl);
+        const text = transcriptList.map(t => t.text).join(' ');
+        if (!text) throw new Error("Video ini tidak memiliki subtitle/transkrip. Coba video lain!");
+        return NextResponse.json({ success: true, text, type: "youtube" });
+      } catch (ytErr: any) {
+        const msg = ytErr?.message || '';
+        if (msg.includes('Transcript is disabled') || msg.includes('disabled')) {
+          throw new Error("❌ Video ini tidak memiliki transkrip/subtitle yang bisa diakses. Coba video YouTube lain yang memiliki CC (closed caption).");
+        }
+        if (msg.includes('Could not retrieve') || msg.includes('not found')) {
+          throw new Error("❌ Video tidak ditemukan atau bersifat privat. Pastikan URL YouTube valid dan video bersifat publik.");
+        }
+        throw new Error(`❌ Gagal mengambil transkrip YouTube: ${msg}`);
+      }
     }
 
     // ===== 2. TEXT (dari Tulis Catatan) =====
@@ -44,19 +67,17 @@ export async function POST(req: Request) {
 
     // ===== PDF =====
     if (mime === 'application/pdf') {
-      const arrayBuffer = await file.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-
-      if (typeof global !== "undefined" && !global.DOMMatrix) {
-        (global as any).DOMMatrix = class DOMMatrix {};
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const pdfParse = require('pdf-parse');
+        const pdfData = await pdfParse(buffer);
+        const text = pdfData.text || '';
+        if (!text.trim()) throw new Error('PDF tidak memiliki teks yang bisa dibaca. Mungkin PDF berupa gambar/scan.');
+        return NextResponse.json({ success: true, text, type: "pdf" });
+      } catch (pdfErr: any) {
+        throw new Error(`❌ Gagal membaca PDF: ${pdfErr.message}. Pastikan PDF berisi teks (bukan gambar scan).`);
       }
-
-      const { PDFParse } = require('pdf-parse');
-      const parser = new PDFParse({ data: buffer });
-      const pdfData = await parser.getText();
-      await parser.destroy();
-
-      return NextResponse.json({ success: true, text: pdfData.text, type: "pdf" });
     }
 
     // ===== AUDIO (mp3, wav, m4a, ogg, webm) =====
@@ -66,8 +87,8 @@ export async function POST(req: Request) {
 
     if (isAudio || isVideo) {
       const fileSizeMB = file.size / (1024 * 1024);
-      if (fileSizeMB > 50) {
-        throw new Error(`File terlalu besar (${fileSizeMB.toFixed(1)}MB). Maksimal 50MB untuk audio/video.`);
+      if (fileSizeMB > 9) {
+        throw new Error(`❌ File terlalu besar (${fileSizeMB.toFixed(1)}MB). Batas maksimal adalah 9MB untuk audio/video di platform ini. Coba kompres file atau gunakan YouTube.`);
       }
 
       console.log(`🎵 Transcribing ${isAudio ? 'audio' : 'video'} via Gemini...`);

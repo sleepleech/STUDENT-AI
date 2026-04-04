@@ -25,18 +25,46 @@ export default function LoginPage() {
     setErrorText("");
 
     if (isLoginView) {
+      // Admin hardcoded
       if (email === "sleepy" && password === "13071997") {
         login("Admin Faqih", "admin");
         router.push("/dashboard");
-      } else if (email && password) {
-        login(email.split("@")[0] || "User", "student");
-        router.push("/dashboard");
-      } else {
-        setErrorText("Email dan Password tidak boleh kosong.");
+        return;
       }
+      
+      // Ambil daftar users dari store — hanya yang aktif boleh login
+      const users = useAuthStore.getState().users;
+      const matchedUser = users.find(
+        (u) => u.email.toLowerCase() === email.toLowerCase() && u.role !== 'admin'
+      );
+
+      if (!matchedUser) {
+        setErrorText("Email tidak ditemukan. Silakan daftar terlebih dahulu.");
+        return;
+      }
+
+      if (matchedUser.status === 'pending') {
+        setErrorText("Akun Anda belum aktif. Hubungi admin di WA 085143820659.");
+        return;
+      }
+
+      if (matchedUser.status === 'suspended') {
+        setErrorText("Akun Anda telah dinonaktifkan. Hubungi admin.");
+        return;
+      }
+
+      // Password check: password disimpan sebagai field, atau fallback ke nama
+      const storedPassword = (matchedUser as any).password;
+      if (storedPassword && storedPassword !== password) {
+        setErrorText("Password salah. Silakan coba lagi.");
+        return;
+      }
+
+      login(matchedUser.email, matchedUser.role, matchedUser.name);
+      router.push("/dashboard");
     } else {
       if (email && password && firstName) {
-        register(`${firstName} ${lastName}`.trim(), email);
+        register(`${firstName} ${lastName}`.trim(), email, password);
         setIsSuccessReg(true);
       } else {
         setErrorText("Kolom wajib (First name, Email, Password) harus diisi.");
