@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { generateJSONWithFallback } from "@/lib/ai/provider";
 import { 
   generateSummaryPrompt, 
   generateFlashcardsPrompt, 
@@ -7,20 +7,11 @@ import {
 } from "@/lib/ai/prompts";
 import { createClient } from "@/lib/supabase/server";
 
-// ===== 🔑 MULTI-KEY ROTATION POOL =====
-// Picks a random Gemini API key on each request — spreads the load across all keys.
-function getRandomGeminiKey(): string {
-  const keysEnv = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
-  const keys = keysEnv.split(",").map((k) => k.trim()).filter(Boolean);
-  
-  if (keys.length === 0) {
-    throw new Error("Tidak ada API Key Gemini! Pastikan GEMINI_API_KEYS sudah diisi di .env.local");
-  }
+export const maxDuration = 60;
 
-  const chosenKey = keys[Math.floor(Math.random() * keys.length)];
-  console.log(`🔑 Using Key Pool [${keys.length} keys] → ...${chosenKey.slice(-6)}`);
-  return chosenKey;
-}
+const SYSTEM_PROMPT = `Kamu adalah Nata Sensei, asisten belajar AI terbaik. 
+Tugasmu adalah membantu siswa memahami materi dengan membuat ringkasan, flashcard, dan kuis yang berkualitas tinggi.
+Selalu jawab dengan format JSON yang valid sesuai instruksi.`;
 
 export async function POST(req: Request) {
   try {
@@ -30,43 +21,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "rawText is required" }, { status: 400 });
     }
 
-    // Pick a random key from the pool — if one is rate-limited, next request gets a fresh key!
-    let apiKey: string;
-    try {
-      apiKey = getRandomGeminiKey();
-    } catch (e: any) {
-      return NextResponse.json({ error: e.message }, { status: 401 });
-    }
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
     console.log(`🚀 Nata Sensei AI Pipeline → Language: ${language}`);
 
-    // 1. Run all 3 AI tasks in parallel
-    const [summaryRes, flashcardsRes, quizRes] = await Promise.all([
-      geminiModel.generateContent({
-        contents: [{ role: "user", parts: [{ text: generateSummaryPrompt(rawText, language) }] }],
-        generationConfig: { responseMimeType: "application/json" }
-      }),
-      geminiModel.generateContent({
-        contents: [{ role: "user", parts: [{ text: generateFlashcardsPrompt(rawText, language) }] }],
-        generationConfig: { responseMimeType: "application/json" }
-      }),
-      geminiModel.generateContent({
-        contents: [{ role: "user", parts: [{ text: generateQuizPrompt(rawText, language) }] }],
-        generationConfig: { responseMimeType: "application/json" }
-      })
+    // Run all 3 AI tasks with auto-fallback across all providers
+    const [summaryData, flashcardsData, quizData] = await Promise.all([
+      generateJSONWithFallback(generateSummaryPrompt(rawText, language), SYSTEM_PROMPT),
+      generateJSONWithFallback(generateFlashcardsPrompt(rawText, language), SYSTEM_PROMPT),
+      generateJSONWithFallback(generateQuizPrompt(rawText, language), SYSTEM_PROMPT),
     ]);
-
-    // 2. Parse results
-    const summaryData = JSON.parse(summaryRes.response.text());
-    const flashcardsData = JSON.parse(flashcardsRes.response.text());
-    const quizData = JSON.parse(quizRes.response.text());
 
     console.log("✅ AI Generation Successful!");
 
-    // 3. Save to Supabase DB (if materialId provided)
+    // Save to Supabase DB (if materialId provided)
     if (materialId) {
       const supabase = await createClient();
       
@@ -99,6 +65,8 @@ export async function POST(req: Request) {
 
   } catch (error: any) {
     console.error("AI Pipeline Error:", error);
-    return NextResponse.json({ error: error.message || "Failed to process material" }, { status: 500 });
+    return NextResponse.json({ 
+      error: error.message || "Failed to process material" 
+    }, { status: 500 });
   }
 }
