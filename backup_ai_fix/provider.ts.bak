@@ -215,44 +215,42 @@ function extractJSON(str: string) {
  * Generate JSON specifically — with aggressive cleaning and array extraction
  */
 export async function generateJSONWithFallback(prompt: string, systemPrompt?: string): Promise<any> {
-    const raw = await generateWithFallback(prompt, systemPrompt, true);
+  const raw = await generateWithFallback(prompt, systemPrompt, true);
+  
+  // 1. Initial Cleaning (Removal of markdown fences)
+  const cleaned = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+  
+  try {
+    let parsed = JSON.parse(cleaned);
     
-    // 1. Initial Cleaning (Removal of markdown fences)
-    // Supports both ```json and ``` formats
-    const cleaned = raw.replace(/```json\s*|```\s*/gi, "").replace(/```\s*$/gi, "").trim();
-    
-    try {
-      let parsed = JSON.parse(cleaned);
-      
-      // 2. Wrap Fix: If we get { "flashcards": [...] } but prompt asked for [ ... ]
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          const keys = Object.keys(parsed);
-          // If only 1 key and it's an array, it's likely a wrap
-          if (keys.length === 1 && Array.isArray(parsed[keys[0]])) {
-              return parsed[keys[0]];
-          }
-      }
-      
-      return parsed;
-    } catch {
-      // 3. Last Resort: Aggressive Extraction via start/end markers
-      const extracted = extractJSON(cleaned);
-      if (extracted) {
-          try {
-              let parsedExtracted = JSON.parse(extracted);
-              // Re-apply wrap fix for extracted part
-              if (parsedExtracted && typeof parsedExtracted === 'object' && !Array.isArray(parsedExtracted)) {
-                  const keys = Object.keys(parsedExtracted);
-                  if (keys.length === 1 && Array.isArray(parsedExtracted[keys[0]])) {
-                      return parsedExtracted[keys[0]];
-                  }
-              }
-              return parsedExtracted;
-          } catch (e) {
-              console.error("❌ Final JSON Extraction Failed:", e);
-          }
-      }
-      
-      throw new Error(`AI response is not valid JSON. Content: ${cleaned.substring(0, 100)}...`);
+    // 2. Wrap Fix: If we get { "flashcards": [...] } but prompt asked for [ ... ]
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const keys = Object.keys(parsed);
+        if (keys.length === 1 && Array.isArray(parsed[keys[0]])) {
+            return parsed[keys[0]];
+        }
     }
+    
+    return parsed;
+  } catch {
+    // 3. Last Resort: Aggressive Extraction via start/end markers
+    const extracted = extractJSON(cleaned);
+    if (extracted) {
+        try {
+            let parsedExtracted = JSON.parse(extracted);
+            // Re-apply wrap fix for extracted part
+            if (parsedExtracted && typeof parsedExtracted === 'object' && !Array.isArray(parsedExtracted)) {
+                const keys = Object.keys(parsedExtracted);
+                if (keys.length === 1 && Array.isArray(parsedExtracted[keys[0]])) {
+                    return parsedExtracted[keys[0]];
+                }
+            }
+            return parsedExtracted;
+        } catch (e) {
+            console.error("Final JSON Extraction Failed:", e);
+        }
+    }
+    
+    throw new Error("AI response is not valid JSON even after extraction.");
+  }
 }

@@ -7,14 +7,11 @@ import {
 } from "@/lib/ai/prompts";
 import { createClient } from "@/lib/supabase/server";
 
-export const maxDuration = 60; // Vercel Pro only (Hobby is 10s-15s)
+export const maxDuration = 60;
 
 const SYSTEM_PROMPT = `Kamu adalah Nata Sensei, asisten belajar AI terbaik. 
 Tugasmu adalah membantu siswa memahami materi dengan membuat ringkasan, flashcard, dan kuis yang berkualitas tinggi.
 Selalu jawab dengan format JSON yang valid sesuai instruksi.`;
-
-// Helper: Small delay to avoid rate limits between tasks
-const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 export async function POST(req: Request) {
   try {
@@ -24,46 +21,48 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "rawText is required" }, { status: 400 });
     }
 
-    console.log(`🚀 Nata Sensei AI Pipeline (Sequential Mode) → Language: ${language}`);
+    console.log(`🚀 Nata Sensei AI Pipeline → Language: ${language}`);
 
-    // --- TASK 1: SUMMARY (Sekuensial) ---
-    let summaryData;
-    try {
-      console.log("📝 Generating Summary...");
-      summaryData = await generateJSONWithFallback(generateSummaryPrompt(rawText, language), SYSTEM_PROMPT);
-    } catch (err) {
-      console.error("❌ Summary Generation Failed:", err);
-      summaryData = { title: "Materi Baru", summary: "Gagal memuat ringkasan otomatis.", key_points: [], cheat_sheet: "" };
-    }
+    // Run all 3 AI tasks in parallel, but with individual try-catch for resilience
+    const [summaryData, flashcardsData, quizData] = await Promise.all([
+      // Task 1: Summary (Critical)
+      (async () => {
+        try {
+          return await generateJSONWithFallback(generateSummaryPrompt(rawText, language), SYSTEM_PROMPT);
+        } catch (err) {
+          console.error("❌ Summary Generation Failed:", err);
+          return { title: "Materi Baru", summary: "Gagal memuat ringkasan.", key_points: [], cheat_sheet: "" };
+        }
+      })(),
+      
+      // Task 2: Flashcards (Optional)
+      (async () => {
+        try {
+          return await generateJSONWithFallback(generateFlashcardsPrompt(rawText, language), SYSTEM_PROMPT);
+        } catch (err) {
+          console.error("❌ Flashcards Generation Failed:", err);
+          return [];
+        }
+      })(),
+      
+      // Task 3: Quiz (Optional)
+      (async () => {
+        try {
+          return await generateJSONWithFallback(generateQuizPrompt(rawText, language), SYSTEM_PROMPT);
+        } catch (err) {
+          console.error("❌ Quiz Generation Failed:", err);
+          return [];
+        }
+      })(),
+    ]);
 
-    await delay(500); // 0.5s pause to breathe
-
-    // --- TASK 2: FLASHCARDS (Sekuensial) ---
-    let flashcardsData = [];
-    try {
-      console.log("🗂️ Generating Flashcards...");
-      flashcardsData = await generateJSONWithFallback(generateFlashcardsPrompt(rawText, language), SYSTEM_PROMPT);
-    } catch (err) {
-      console.error("❌ Flashcards Generation Failed:", err);
-    }
-
-    await delay(500); // 0.5s pause to breathe
-
-    // --- TASK 3: QUIZ (Sekuensial) ---
-    let quizData = [];
-    try {
-      console.log("⚔️ Generating Quiz Arena...");
-      quizData = await generateJSONWithFallback(generateQuizPrompt(rawText, language), SYSTEM_PROMPT);
-    } catch (err) {
-      console.error("❌ Quiz Generation Failed:", err);
-    }
-
-    console.log("✅ AI Generation Sequence Completed!");
+    console.log("✅ AI Generation Successful!");
 
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     let finalMaterialId = materialId;
 
+    // Save to Supabase DB (Essential for Cloud Sync)
     if (user) {
       if (!finalMaterialId) {
         // Create NEW material record
@@ -72,7 +71,7 @@ export async function POST(req: Request) {
           title: summaryData.title || "Materi Baru",
           summary: summaryData,
           is_processed: true,
-          source_type: "pdf" 
+          source_type: "pdf" // default, updated by client if needed
         }).select().single();
         
         if (createError) console.error("Create material error:", createError);
@@ -87,8 +86,8 @@ export async function POST(req: Request) {
       }
 
       if (finalMaterialId) {
-        // Insert Flashcards (Clear old ones first if needed - simplified version skips)
-        if (flashcardsData && flashcardsData.length > 0) {
+        // Insert Flashcards
+        if (flashcardsData.length > 0) {
           const mappedFlashcards = flashcardsData.map((card: any) => ({
             material_id: finalMaterialId,
             question: card.question,
@@ -98,13 +97,13 @@ export async function POST(req: Request) {
         }
 
         // Insert Quizzes
-        if (quizData && quizData.length > 0) {
+        if (quizData.length > 0) {
           await supabase.from('quizzes').insert({ 
             material_id: finalMaterialId, 
             questions: quizData 
           });
         }
-        console.log("💾 Saved to Database (Sequential Sync Complete)!");
+        console.log("💾 Saved to Database (Cloud Sync Active)!");
       }
     }
 
@@ -119,7 +118,7 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    console.error("AI Pipeline Sequential Error:", error);
+    console.error("AI Pipeline Error:", error);
     return NextResponse.json({ 
       error: error.message || "Failed to process material" 
     }, { status: 500 });
