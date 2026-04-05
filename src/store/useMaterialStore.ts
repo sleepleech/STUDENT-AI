@@ -42,27 +42,36 @@ export const useMaterialStore = create<MaterialState>((set, get) => ({
    * Fetch from Supabase Cloud (Sync Desktop/Mobile)
    */
   fetchMaterials: async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-    const { data, error } = await supabase
-      .from('materials')
-      .select('*, flashcards(*), quizzes(*)')
-      .eq('owner_id', user.id)
-      .order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('materials')
+        .select('*, flashcards(*), quizzes(*)')
+        .eq('owner_id', user.id)
+        .order('created_at', { ascending: false });
 
-    if (!error && data) {
-      const items: MaterialItem[] = data.map(m => ({
-        id: m.id,
-        ownerId: m.owner_id,
-        title: m.title,
-        sourceType: m.source_type as any,
-        savedAt: m.created_at,
-        summary: m.summary,
-        flashcards: m.flashcards || [],
-        quiz: m.quizzes?.[0]?.questions || []
-      }));
-      set({ materialHistory: items });
+      if (error) {
+        console.error("❌ Supabase Fetch Error:", error.message);
+        return;
+      }
+
+      if (data) {
+        const items: MaterialItem[] = data.map(m => ({
+          id: m.id,
+          ownerId: m.owner_id,
+          title: m.title,
+          sourceType: m.source_type as any,
+          savedAt: m.created_at,
+          summary: m.summary,
+          flashcards: m.flashcards || [],
+          quiz: m.quizzes?.[0]?.questions || []
+        }));
+        set({ materialHistory: items });
+      }
+    } catch (err) {
+      console.error("❌ Store Sync Error:", err);
     }
   },
 
