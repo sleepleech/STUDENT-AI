@@ -161,7 +161,7 @@ Beri judul: "Rekonstruksi Materi: ${title}"`;
       }
     }
 
-    // Audio/Video
+    // Audio/Video Transcription via Gemini (with KEY ROTATION)
     if (mime.startsWith('audio/') || mime.startsWith('video/')) {
       const fileSizeMB = file.size / (1024 * 1024);
       if (fileSizeMB > 10) throw new Error("File maksimal 10MB!");
@@ -170,18 +170,38 @@ Beri judul: "Rekonstruksi Materi: ${title}"`;
       const base64Data = Buffer.from(arrayBuffer).toString('base64');
       
       const apiKeyEnv = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
-      const apiKey = apiKeyEnv.split(",")[0].trim();
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const keys = apiKeyEnv.split(",").map(k => k.trim()).filter(Boolean);
+      
+      let transcribedText = "";
+      let lastError: any = null;
 
-      const prompt = `Transkripsi seluruh isi file ini dalam Bahasa Indonesia.`;
-      const result = await model.generateContent([
-        { text: prompt },
-        { inlineData: { mimeType: mime, data: base64Data } }
-      ]);
+      // Try all available Gemini keys
+      for (let i = 0; i < keys.length; i++) {
+        try {
+          console.log(`🎙️ Transcribing via Gemini Key #${i + 1}...`);
+          const genAI = new GoogleGenerativeAI(keys[i]);
+          const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-      const text = result.response.text();
-      return NextResponse.json({ success: true, text, type: mime.startsWith('audio') ? "audio" : "video" });
+          const prompt = `Transkripsi seluruh isi file ini dalam Bahasa Indonesia.`;
+          const result = await model.generateContent([
+            { text: prompt },
+            { inlineData: { mimeType: mime, data: base64Data } }
+          ]);
+
+          transcribedText = result.response.text();
+          if (transcribedText) break;
+        } catch (err: any) {
+          lastError = err;
+          console.warn(`⚠️ Gemini Key #${i + 1} failed: ${err.message}`);
+          continue;
+        }
+      }
+
+      if (!transcribedText) {
+        throw new Error(`Gagal transkripsi file: ${lastError?.message || "Semua kunci Gemini gagal"}`);
+      }
+
+      return NextResponse.json({ success: true, text: transcribedText, type: mime.startsWith('audio') ? "audio" : "video" });
     }
 
     throw new Error(`Format '${mime}' tidak didukung.`);

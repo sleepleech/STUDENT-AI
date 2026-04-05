@@ -1,13 +1,21 @@
 /**
- * Universal AI Provider — Auto Fallback Chain
+ * Universal AI Provider — Auto Fallback Chain (Hyper-Reliable Edition)
  * 
- * Priority: Gemini → Groq → Cerebras → SambaNova
+ * Priority: Random(Gemini) → Random(Groq) → Random(Cerebras) → Random(SambaNova)
  * 
- * All providers except Gemini use OpenAI-compatible API format.
- * If one provider hits quota, automatically tries the next one.
+ * Includes key shuffling to distribute load and aggressive error detection.
  */
 
-// ===== PROVIDER CONFIGS =====
+// Helper to shuffle arrays (Fisher-Yates) for random key selection
+function shuffleArray<T>(array: T[]): T[] {
+  const newArr = [...array];
+  for (let i = newArr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArr[i], newArr[j]] = [newArr[j], newArr[i]];
+  }
+  return newArr;
+}
+
 const PROVIDERS = [
   {
     name: "Gemini",
@@ -34,7 +42,7 @@ const PROVIDERS = [
     type: "openai_compat" as const,
     keysEnv: "SAMBANOVA_API_KEY",
     baseUrl: "https://api.sambanova.ai/v1",
-    model: "Meta-Llama-3.3-70B-Instruct",
+    model: "Meta-Llama-3.3-70B-Instruct", // Alternative: "Llama-3.3-70B-Instruct"
   },
 ];
 
@@ -44,14 +52,17 @@ function getKeys(envName: string): string[] {
 }
 
 function isQuotaError(msg: string): boolean {
+  const lower = msg.toLowerCase();
   return (
-    msg.includes("429") ||
-    msg.includes("quota") ||
-    msg.includes("RESOURCE_EXHAUSTED") ||
-    msg.includes("rate_limit") ||
-    msg.includes("rate limit") ||
-    msg.includes("too many requests") ||
-    msg.includes("overloaded")
+    lower.includes("429") ||
+    lower.includes("quota") ||
+    lower.includes("limit") || // Matches "Rate limit reached"
+    lower.includes("reached") ||
+    lower.includes("resource_exhausted") ||
+    lower.includes("rate_limit") ||
+    lower.includes("too many requests") ||
+    lower.includes("overloaded") ||
+    lower.includes("available") // "No models available" etc.
   );
 }
 
@@ -59,6 +70,7 @@ function isQuotaError(msg: string): boolean {
  * Call OpenAI-compatible API (Groq, Cerebras, SambaNova)
  */
 async function callOpenAICompat(
+  providerName: string,
   baseUrl: string,
   apiKey: string,
   model: string,
@@ -66,27 +78,33 @@ async function callOpenAICompat(
   userPrompt: string,
   jsonMode = false
 ): Promise<string> {
+  const body: any = {
+    model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    temperature: 0.3,
+    max_tokens: 8000,
+  };
+
+  // Only add response_format if jsonMode is true (prevents 400 on some providers)
+  if (jsonMode) {
+    body.response_format = { type: "json_object" };
+  }
+
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
-      temperature: 0.3,
-      max_tokens: 8000,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`HTTP ${response.status}: ${errText.slice(0, 200)}`);
+    throw new Error(`[${providerName}] HTTP ${response.status}: ${errText.slice(0, 300)}`);
   }
 
   const data = await response.json();
@@ -116,10 +134,6 @@ async function callGemini(
 
 /**
  * Main function: Generate text with automatic fallback across all providers
- * 
- * @param prompt        The user prompt to send
- * @param systemPrompt  Optional system prompt (for non-Gemini providers)
- * @param jsonMode      Whether to request JSON output
  */
 export async function generateWithFallback(
   prompt: string,
@@ -129,12 +143,18 @@ export async function generateWithFallback(
   const errors: string[] = [];
 
   for (const provider of PROVIDERS) {
-    const keys = getKeys(provider.keysEnv);
-    if (keys.length === 0) continue;
+    const rawKeys = getKeys(provider.keysEnv);
+    if (rawKeys.length === 0) continue;
 
-    for (const key of keys) {
+    // SHUFFLE KEYS to distribute load evenly!
+    const keys = shuffleArray(rawKeys);
+
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const keyShort = key.slice(0, 6) + "...";
+
       try {
-        console.log(`🤖 Trying ${provider.name}...`);
+        console.log(`🤖 Trying ${provider.name} (Key ${i + 1}/${keys.length}: ${keyShort})...`);
 
         let result: string;
 
@@ -142,6 +162,7 @@ export async function generateWithFallback(
           result = await callGemini(key, provider.model, prompt, jsonMode);
         } else {
           result = await callOpenAICompat(
+            provider.name,
             provider.baseUrl!,
             key,
             provider.model,
@@ -158,17 +179,23 @@ export async function generateWithFallback(
 
       } catch (err: any) {
         const msg = err?.message || String(err);
-        errors.push(`[${provider.name}] ${msg.slice(0, 100)}`);
+        errors.push(msg.slice(0, 150));
 
-        if (isQuotaError(msg.toLowerCase())) {
-          console.warn(`⚠️ ${provider.name} quota/rate limit, trying next...`);
-          await new Promise((r) => setTimeout(r, 500));
-          continue;
+        if (isQuotaError(msg)) {
+          console.warn(`⚠️ ${provider.name} Key #${i + 1} limit, retrying next key...`);
+          await new Promise((r) => setTimeout(r, 800)); // wait brief moment
+          continue; // tries next KEY of same provider
         }
 
-        // Non-quota error: skip this key but continue to next
-        console.error(`❌ ${provider.name} error (non-quota): ${msg.slice(0, 100)}`);
-        break;
+        // Non-quota error but we still have more keys? Retry anyway just in case it's a transient network issue
+        if (i < keys.length - 1) {
+           console.warn(`❌ ${provider.name} unexpected error, trying next key...`);
+           continue;
+        }
+
+        // If last key failed with non-quota error, move to next provider
+        console.error(`❌ ${provider.name} totally failed, moving to next provider.`);
+        break; 
       }
     }
   }
@@ -179,27 +206,20 @@ export async function generateWithFallback(
 }
 
 /**
- * Generate JSON specifically — parses and validates the output
+ * Generate JSON specifically
  */
 export async function generateJSONWithFallback(
   prompt: string,
   systemPrompt?: string
 ): Promise<any> {
   const raw = await generateWithFallback(prompt, systemPrompt, true);
-
-  // Clean markdown code fences if present
-  const cleaned = raw
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/```\s*$/i, "")
-    .trim();
+  const cleaned = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
 
   try {
     return JSON.parse(cleaned);
   } catch {
-    // Try to extract first JSON object/array
     const jsonMatch = cleaned.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
     if (jsonMatch) return JSON.parse(jsonMatch[1]);
-    throw new Error("AI response is not valid JSON: " + cleaned.slice(0, 200));
+    throw new Error("AI response is not valid JSON.");
   }
 }
