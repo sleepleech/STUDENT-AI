@@ -97,14 +97,29 @@ export async function POST(req: Request) {
           await supabase.from('flashcards').insert(mappedFlashcards);
         }
 
-        // Insert Quizzes
-        if (quizData && quizData.length > 0) {
-          await supabase.from('quizzes').insert({ 
-            material_id: finalMaterialId, 
-            questions: quizData 
-          });
+        // Insert Quizzes (More resilient extraction)
+        if (quizData) {
+          let questionsToInsert = [];
+          if (Array.isArray(quizData)) {
+            questionsToInsert = quizData;
+          } else if (typeof quizData === 'object' && quizData !== null) {
+             // Handle if AI returns { quiz: [...] } or { questions: [...] }
+             questionsToInsert = quizData.questions || quizData.quiz || quizData.data || [];
+          }
+
+          if (questionsToInsert && questionsToInsert.length > 0) {
+            console.log(`💾 Inserting ${questionsToInsert.length} quiz questions...`);
+            const { error: quizError } = await supabase.from('quizzes').insert({ 
+              material_id: finalMaterialId, 
+              questions: questionsToInsert 
+            });
+            if (quizError) console.error("❌ Error inserting quizzes:", quizError.message);
+            else console.log("✅ Quizzes successfully saved!");
+          } else {
+            console.warn("⚠️ Quiz data was empty or invalid after processing.");
+          }
         }
-        console.log("💾 Saved to Database (Sequential Sync Complete)!");
+        console.log("💾 Pipeline sequence complete!");
       }
     }
 

@@ -58,6 +58,7 @@ export const useMaterialStore = create<MaterialState>((set, get) => ({
       }
 
       if (data) {
+        console.log("📊 Raw Materials Data:", data); // Check relationship names in console
         const items: MaterialItem[] = data.map(m => ({
           id: m.id,
           ownerId: m.owner_id,
@@ -66,7 +67,8 @@ export const useMaterialStore = create<MaterialState>((set, get) => ({
           savedAt: m.created_at,
           summary: m.summary,
           flashcards: m.flashcards || [],
-          quiz: m.quizzes?.[0]?.questions || []
+          // Handle both singular and plural quiz mappings
+          quiz: (m.quizzes?.[0]?.questions) || (m.quiz?.[0]?.questions) || []
         }));
         set({ materialHistory: items });
       }
