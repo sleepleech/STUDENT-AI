@@ -1,8 +1,7 @@
 /**
- * Universal AI Provider — Hyper-Reliable Edition (v3)
+ * Universal AI Provider — Hyper-Reliable Edition (v4)
  * 
- * Priority: Gemini → Groq → Cerebras → SambaNova
- * Features: Key Shuffling + Model Fallback (70B -> 8B) + Detection 404/429.
+ * Features: Key Shuffling + Model Fallback + Advanced JSON Extraction.
  */
 
 function shuffleArray<T>(array: T[]): T[] {
@@ -44,7 +43,7 @@ const PROVIDERS = [
     keysEnv: "SAMBANOVA_API_KEY",
     baseUrl: "https://api.sambanova.ai/v1",
     mainModel: "Llama-3.3-70B-Instruct",
-    fallbackModel: "Llama-3.2-1B-Instruct", // Ultra lightweight fallback
+    fallbackModel: "Llama-3.1-8B-Instruct", 
   },
 ];
 
@@ -60,9 +59,7 @@ function isLimitError(msg: string): boolean {
     lower.includes("quota") ||
     lower.includes("limit") ||
     lower.includes("reached") ||
-    lower.includes("resource_exhausted") ||
-    lower.includes("too many requests") ||
-    lower.includes("overloaded")
+    lower.includes("resource_exhausted") 
   );
 }
 
@@ -115,7 +112,6 @@ async function callGemini(
 ): Promise<string> {
   const { GoogleGenerativeAI } = await import("@google/generative-ai");
   const genAI = new GoogleGenerativeAI(apiKey);
-  // Ensure model name has 'models/' prefix for SDK reliably
   const modelId = model.includes("/") ? model : `models/${model}`;
   const geminiModel = genAI.getGenerativeModel({ model: modelId });
 
@@ -145,8 +141,6 @@ export async function generateWithFallback(
 
     for (let i = 0; i < keys.length; i++) {
         const key = keys[i];
-        
-        // Model rotation: Try MainModel first, then FallbackModel if needed
         const modelList = [provider.mainModel, provider.fallbackModel];
         
         for (const targetModel of modelList) {
@@ -174,20 +168,11 @@ export async function generateWithFallback(
           } catch (err: any) {
             const rawMsg = err?.message || String(err);
             console.warn(`⚠️ [${provider.name}] Failed with model ${targetModel}: ${rawMsg.slice(0, 100)}`);
-            
             allErrors.push(`[${provider.name}/${targetModel}] ${rawMsg.slice(0, 80)}`);
             
-            // If it's a 404 on Gemini or a 400 on SambaNova, try the next model on the same key!
-            if (rawMsg.includes("404") || rawMsg.includes("400")) {
-                continue; // try fallbackModel with the same key
-            }
-
-            // If it's a limit error, try next MODEL or next KEY
-            if (isLimitError(rawMsg)) {
+            if (rawMsg.includes("404") || rawMsg.includes("400") || isLimitError(rawMsg)) {
                 continue; 
             }
-            
-            // For other critical errors, break this key but move to next key/model
             break; 
           }
         }
@@ -195,18 +180,77 @@ export async function generateWithFallback(
   }
 
   throw new Error(
-    `Semua AI provider gagal. Silakan periksa Vercel Logs untuk detail API. Terakhir: ${allErrors.pop()}`
+    `Semua AI provider gagal. Terakhir: ${allErrors.pop()}`
   );
 }
 
+/**
+ * Helper to extract the most likely JSON object or array from a string
+ */
+function extractJSON(str: string) {
+    // Look for first { or [
+    const firstBrace = str.indexOf('{');
+    const firstBracket = str.indexOf('[');
+    
+    let start = -1;
+    let endChar = '';
+    
+    if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+        start = firstBrace;
+        endChar = '}';
+    } else if (firstBracket !== -1) {
+        start = firstBracket;
+        endChar = ']';
+    }
+    
+    if (start === -1) return null;
+    
+    let end = str.lastIndexOf(endChar);
+    if (end === -1 || end < start) return null;
+    
+    return str.slice(start, end + 1);
+}
+
+/**
+ * Generate JSON specifically — with aggressive cleaning and array extraction
+ */
 export async function generateJSONWithFallback(prompt: string, systemPrompt?: string): Promise<any> {
   const raw = await generateWithFallback(prompt, systemPrompt, true);
+  
+  // 1. Initial Cleaning (Removal of markdown fences)
   const cleaned = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+  
   try {
-    return JSON.parse(cleaned);
+    let parsed = JSON.parse(cleaned);
+    
+    // 2. Wrap Fix: If we get { "flashcards": [...] } but prompt asked for [ ... ]
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const keys = Object.keys(parsed);
+        if (keys.length === 1 && Array.isArray(parsed[keys[0]])) {
+            return parsed[keys[0]];
+        }
+    }
+    
+    return parsed;
   } catch {
-    const jsonMatch = cleaned.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-    if (jsonMatch) return JSON.parse(jsonMatch[1]);
-    throw new Error("AI response is not valid JSON.");
+    // 3. Last Resort: Aggressive Extraction via start/end markers
+    const extracted = extractJSON(cleaned);
+    if (extracted) {
+        try {
+            let parsedExtracted = JSON.parse(extracted);
+            // Re-apply wrap fix for extracted part
+            if (parsedExtracted && typeof parsedExtracted === 'object' && !Array.isArray(parsedExtracted)) {
+                const keys = Object.keys(parsedExtracted);
+                if (keys.length === 1 && Array.isArray(parsedExtracted[keys[0]])) {
+                    return parsedExtracted[keys[0]];
+                }
+            }
+            return parsedExtracted;
+        } catch (e) {
+            console.error("Final JSON Extraction Failed:", e);
+        }
+    }
+    
+    throw new Error("AI response is not valid JSON even after extraction.");
   }
 }

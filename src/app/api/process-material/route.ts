@@ -23,11 +23,37 @@ export async function POST(req: Request) {
 
     console.log(`🚀 Nata Sensei AI Pipeline → Language: ${language}`);
 
-    // Run all 3 AI tasks with auto-fallback across all providers
+    // Run all 3 AI tasks in parallel, but with individual try-catch for resilience
     const [summaryData, flashcardsData, quizData] = await Promise.all([
-      generateJSONWithFallback(generateSummaryPrompt(rawText, language), SYSTEM_PROMPT),
-      generateJSONWithFallback(generateFlashcardsPrompt(rawText, language), SYSTEM_PROMPT),
-      generateJSONWithFallback(generateQuizPrompt(rawText, language), SYSTEM_PROMPT),
+      // Task 1: Summary (Critical)
+      (async () => {
+        try {
+          return await generateJSONWithFallback(generateSummaryPrompt(rawText, language), SYSTEM_PROMPT);
+        } catch (err) {
+          console.error("❌ Summary Generation Failed:", err);
+          return { title: "Materi Baru", summary: "Gagal memuat ringkasan.", key_points: [], cheat_sheet: "" };
+        }
+      })(),
+      
+      // Task 2: Flashcards (Optional)
+      (async () => {
+        try {
+          return await generateJSONWithFallback(generateFlashcardsPrompt(rawText, language), SYSTEM_PROMPT);
+        } catch (err) {
+          console.error("❌ Flashcards Generation Failed:", err);
+          return [];
+        }
+      })(),
+      
+      // Task 3: Quiz (Optional)
+      (async () => {
+        try {
+          return await generateJSONWithFallback(generateQuizPrompt(rawText, language), SYSTEM_PROMPT);
+        } catch (err) {
+          console.error("❌ Quiz Generation Failed:", err);
+          return [];
+        }
+      })(),
     ]);
 
     console.log("✅ AI Generation Successful!");

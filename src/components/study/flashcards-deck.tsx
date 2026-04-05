@@ -17,6 +17,8 @@ export function FlashcardsDeck({ cards }: FlashcardProps) {
 
   const currentCard = cards[index];
 
+  if (!currentCard) return <div className="p-10 text-center">Gagal memuat kartu.</div>;
+
   const handleNext = () => {
     setIsFlipped(false);
     setTimeout(() => {
