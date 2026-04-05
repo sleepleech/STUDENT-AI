@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { YoutubeTranscript } from 'youtube-transcript';
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { generateWithFallback } from "@/lib/ai/provider";
 
-// Increase body size limit for Vercel (allow up to 10MB)
+// Increase body size limit for Vercel
 export const config = {
   api: {
     bodyParser: {
@@ -11,13 +12,11 @@ export const config = {
   },
 };
 
-// Vercel Edge: increase payload size for Next.js App Router
 export const maxDuration = 60; // seconds
 
-// ====== SMART CACHE (in-memory, survives warm Vercel instances) ======
-// Cache stores results for 24 hours — same URL never processed twice!
+// ====== SMART CACHING (In-Memory) ======
 const resultCache = new Map<string, { text: string; type: string; cachedAt: number }>();
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function getCached(key: string) {
   const entry = resultCache.get(key);
@@ -33,138 +32,121 @@ function setCache(key: string, text: string, type: string) {
   resultCache.set(key, { text, type, cachedAt: Date.now() });
 }
 
-// ====== PER-KEY QUOTA TRACKER ======
-// Track last request time per key to enforce minimum spacing
-const keyLastUsed = new Map<string, number>();
-const MIN_KEY_INTERVAL_MS = 500; // min 0.5s between requests per key
-
-
-// Get all keys as array
-function getAllGeminiKeys(): string[] {
-  const keysEnv = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
-  const keys = keysEnv.split(",").map((k) => k.trim()).filter(Boolean);
-  if (keys.length === 0) throw new Error("Tidak ada API Key Gemini!");
-  return keys;
-}
-
-function getRandomGeminiKey(): string {
-  const keys = getAllGeminiKeys();
-  return keys[Math.floor(Math.random() * keys.length)];
-}
-
-// Try Gemini with all keys in sequence until one works
-async function geminiWithFallback(parts: any[], modelName = "gemini-1.5-flash"): Promise<string> {
-  const keys = getAllGeminiKeys();
-  let lastError: any;
-
-  for (const key of keys) {
-    // Throttle: ensure minimum time between requests on same key
-    const lastUsed = keyLastUsed.get(key) || 0;
-    const waitMs = MIN_KEY_INTERVAL_MS - (Date.now() - lastUsed);
-    if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
-
-    try {
-      keyLastUsed.set(key, Date.now());
-      const genAI = new GoogleGenerativeAI(key);
-      const model = genAI.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent(parts);
-      return result.response.text();
-    } catch (err: any) {
-      lastError = err;
-      const msg = err?.message || '';
-      // If quota/rate error, try next key after brief wait
-      if (msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('rate')) {
-        console.warn(`⚠️ Key quota exceeded, trying next key...`);
-        await new Promise(r => setTimeout(r, 1000)); // wait 1s before next key
-        continue;
-      }
-      throw err;
+/**
+ * Strategy 2: Official YouTube oEmbed (Reliable Metadata)
+ * Does not get blocked easily like HTML scraping.
+ */
+async function getYouTubeOEmbed(url: string) {
+  try {
+    const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+    const response = await fetch(oembedUrl);
+    
+    if (!response.ok) {
+      console.warn(`[YT_OEMBED_FAILED] HTTP ${response.status} for ${url}`);
+      return null;
     }
+    
+    const data = await response.json();
+    return {
+      title: data.title || "",
+      author: data.author_name || "",
+      thumbnail: data.thumbnail_url || ""
+    };
+  } catch (err) {
+    console.error("[YT_OEMBED_ERROR]", err);
+    return null;
   }
-  throw new Error(`Semua API key habis kuota. Coba lagi dalam 1-2 menit. (${lastError?.message})`);
 }
 
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
 
-    // ===== 1. YOUTUBE =====
+    // ===== 1. YOUTUBE EXTRACTION =====
     const youtubeUrl = formData.get('youtubeUrl') as string;
     if (youtubeUrl) {
-      // ⚡ CACHE CHECK — same URL within 24h = instant result, no API call!
+      // ⚡ CACHE CHECK
       const cached = getCached(youtubeUrl);
-      if (cached) {
-        console.log("⚡ Cache HIT for:", youtubeUrl);
-        return NextResponse.json({ success: true, text: cached.text, type: cached.type, fromCache: true });
-      }
+      if (cached) return NextResponse.json({ success: true, text: cached.text, type: cached.type, fromCache: true });
 
-      console.log("📺 Strategy 1 - Try youtube-transcript:", youtubeUrl);
+      console.log(`[YT_PROCESS_START] ${youtubeUrl}`);
 
-      // Strategy 1: Try subtitle extraction with multiple language fallbacks
-      const langs = ['id', 'id-ID', 'en', 'en-US', 'a.id', 'a.en'];
-      for (const lang of langs) {
-        try {
-          const transcriptList = await YoutubeTranscript.fetchTranscript(youtubeUrl, { lang });
-          const text = transcriptList.map(t => t.text).join(' ');
-          if (text && text.trim().length > 20) {
-            console.log(`✅ Transcript fetched via lang: ${lang}`);
-            setCache(youtubeUrl, text, 'youtube'); // 💾 Cache result!
-            return NextResponse.json({ success: true, text, type: "youtube" });
-          }
-        } catch (_) {
-          // try next lang
-        }
-      }
-
-      // Strategy 2: Use Gemini's native YouTube video understanding via fileData
-      console.log("📺 Strategy 2 - Gemini native YouTube analysis...");
+      // Strategy 1: YouTube Transcript (Subtitles)
+      let transcriptText = "";
       try {
-        const ytPrompt = `Kamu adalah asisten belajar AI. Tonton video YouTube ini dan lakukan hal berikut:
-1. Transkripsi semua yang dibicarakan secara lengkap (dalam Bahasa Indonesia).
-2. Jika pembicaraan dalam bahasa lain, terjemahkan ke Bahasa Indonesia.
-3. Tulis secara rapi dan urut sesuai alur video.
-Jangan tambahkan opini, hanya isi konten yang dibicarakan di video ini.`;
-
-        const text = await geminiWithFallback([
-          { text: ytPrompt },
-          {
-            fileData: {
-              mimeType: "video/mp4",
-              fileUri: youtubeUrl,
-            }
-          }
-        ], "gemini-1.5-flash");
-
-        if (text && text.trim().length > 20) {
-          setCache(youtubeUrl, text, 'youtube'); // 💾 Cache Gemini result too!
-          return NextResponse.json({ success: true, text, type: "youtube" });
+        // Try multiple language attempts
+        const langs = ['id', 'en', 'id-ID', 'en-US', 'a.id', 'a.en'];
+        for (const lang of langs) {
+          try {
+            const transcriptList = await YoutubeTranscript.fetchTranscript(youtubeUrl, { lang });
+            transcriptText = transcriptList.map(t => t.text).join(' ');
+            if (transcriptText.trim().length > 100) break;
+          } catch (_) {}
         }
-      } catch (geminiErr: any) {
-        console.error("Gemini YouTube fallback error:", geminiErr.message);
+      } catch (transcriptErr) {
+        console.warn(`[YT_TRANSCRIPT_FAILED] Trying metadata...`);
       }
 
-      throw new Error("❌ Video tidak dapat diproses. Kemungkinan video bersifat privat, tidak tersedia, atau semua API key sedang di-cooldown. Coba lagi dalam 1 menit.");
+      if (transcriptText && transcriptText.trim().length > 100) {
+        console.log(`[YT_TRANSCRIPT_SUCCESS] Length: ${transcriptText.length}`);
+        setCache(youtubeUrl, transcriptText, 'youtube');
+        return NextResponse.json({ success: true, text: transcriptText, type: "youtube" });
+      }
+
+      // Strategy 2: OEmbed Metadata + AI Knowledge Fallback
+      console.log(`[YT_FALLBACK_MODE] Accessing OEmbed...`);
+      const meta = await getYouTubeOEmbed(youtubeUrl);
+      
+      const title = meta?.title || "Video Unknown";
+      const author = meta?.author || "Channel Unknown";
+
+      const fallbackPrompt = `
+Judul Video: "${title}"
+Channel: "${author}"
+URL: "${youtubeUrl}"
+
+Metode pengambilan transkrip standar gagal. Sebagai asisten belajar yang sangat cerdas, gunakan basis pengetahuan (knowledge base) internal kamu untuk merekonstruksi isi materi video ini. 
+
+Jika kamu mengenali video ini, ceritakan secara mendalam apa saja poin-poin yang dibahas. 
+Jika kamu tidak spesifik mengenali transkripnya, buatlah ringkasan materi belajar yang sangat berkualitas berdasarkan Judul dan Topik yang relevan dengan video tersebut (dalam Bahasa Indonesia).
+
+Pastikan teks rekonstruksi ini panjang (minimal 500-800 kata), edukatif, dan siap dipelajari oleh siswa. 
+Beri judul: "Rekonstruksi Materi: ${title}"`;
+
+      try {
+        console.log(`[YT_AI_RECONSTRUCTION] Calling generateWithFallback...`);
+        const reconstructedText = await generateWithFallback(
+          fallbackPrompt, 
+          "Kamu adalah asisten belajar AI yang ahli dalam merekonstruksi isi konten video edukasi."
+        );
+        
+        if (reconstructedText && reconstructedText.length > 200) {
+          console.log(`[YT_FINISH] Success via AI Reconstruction`);
+          setCache(youtubeUrl, reconstructedText, 'youtube');
+          return NextResponse.json({ success: true, text: reconstructedText, type: "youtube", isReconstruction: true });
+        }
+      } catch (aiErr: any) {
+        console.error(`[YT_AI_ERROR] ${aiErr.message}`);
+      }
+
+      throw new Error(`❌ Semua metode gagal. Judul video: "${title}". Akses ke transkrip diblokir oleh YouTube. Coba upload file audionya langsung.`);
     }
 
-    // ===== 2. TEXT (dari Tulis Catatan) =====
+    // ===== 2. TEXT EXTRACTION =====
     const rawText = formData.get('rawText') as string;
     if (rawText) {
-      if (rawText.trim().length < 50) {
-        throw new Error("Catatan terlalu pendek! Minimal 50 karakter agar AI bisa merangkum.");
-      }
+      if (rawText.trim().length < 50) throw new Error("Catatan terlalu pendek!");
       return NextResponse.json({ success: true, text: rawText.trim(), type: "note" });
     }
 
-    // ===== 3. FILE (PDF / Audio / Video) =====
+    // ===== 3. FILE EXTRACTION =====
     const file = formData.get('file') as File;
-    if (!file) {
-      return NextResponse.json({ error: "Tidak ada file atau sumber yang diberikan" }, { status: 400 });
-    }
+    if (!file) return NextResponse.json({ error: "Input tidak valid" }, { status: 400 });
 
     const mime = file.type;
     console.log(`📁 Processing file: ${file.name} [${mime}]`);
 
-    // ===== PDF =====
+    // PDF 
     if (mime === 'application/pdf') {
       try {
         const arrayBuffer = await file.arrayBuffer();
@@ -172,64 +154,40 @@ Jangan tambahkan opini, hanya isi konten yang dibicarakan di video ini.`;
         const pdfParse = require('pdf-parse');
         const pdfData = await pdfParse(buffer);
         const text = pdfData.text || '';
-        if (!text.trim()) throw new Error('PDF tidak memiliki teks yang bisa dibaca. Mungkin PDF berupa gambar/scan.');
+        if (!text.trim()) throw new Error('PDF tidak terbaca.');
         return NextResponse.json({ success: true, text, type: "pdf" });
-      } catch (pdfErr: any) {
-        throw new Error(`❌ Gagal membaca PDF: ${pdfErr.message}. Pastikan PDF berisi teks (bukan gambar scan).`);
+      } catch (err: any) {
+        throw new Error(`Gagal membaca PDF: ${err.message}`);
       }
     }
 
-    // ===== AUDIO (mp3, wav, m4a, ogg, webm) =====
-    const isAudio = mime.startsWith('audio/') || ['audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/ogg', 'audio/webm'].includes(mime);
-    // ===== VIDEO (mp4, mov, webm, avi) =====
-    const isVideo = mime.startsWith('video/');
-
-    if (isAudio || isVideo) {
+    // Audio/Video
+    if (mime.startsWith('audio/') || mime.startsWith('video/')) {
       const fileSizeMB = file.size / (1024 * 1024);
-      if (fileSizeMB > 9) {
-        throw new Error(`❌ File terlalu besar (${fileSizeMB.toFixed(1)}MB). Batas maksimal adalah 9MB untuk audio/video di platform ini. Coba kompres file atau gunakan YouTube.`);
-      }
+      if (fileSizeMB > 10) throw new Error("File maksimal 10MB!");
 
-      console.log(`🎵 Transcribing ${isAudio ? 'audio' : 'video'} via Gemini...`);
-
-      // Convert to base64 for Gemini inline data
       const arrayBuffer = await file.arrayBuffer();
       const base64Data = Buffer.from(arrayBuffer).toString('base64');
-
-      const apiKey = getRandomGeminiKey();
+      
+      const apiKeyEnv = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
+      const apiKey = apiKeyEnv.split(",")[0].trim();
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-      const prompt = isAudio
-        ? `Kamu adalah transkriptor profesional. Transkripsi seluruh isi audio ini secara lengkap dan akurat. Jangan tambahkan komentar, cukup tuliskan teks transkrip saja. Jika ada beberapa pembicara, tandai dengan "Pembicara 1:", "Pembicara 2:", dst.`
-        : `Kamu adalah transkriptor profesional. Transkripsi seluruh konten yang dibicarakan dalam video ini secara lengkap. Tulis semua yang diucapkan secara verbatim. Jika ada beberapa pembicara, tandai dengan nama atau "Pembicara 1:", "Pembicara 2:", dst. Jangan tambahkan komentar lain.`;
-
+      const prompt = `Transkripsi seluruh isi file ini dalam Bahasa Indonesia.`;
       const result = await model.generateContent([
         { text: prompt },
-        {
-          inlineData: {
-            mimeType: mime,
-            data: base64Data,
-          }
-        }
+        { inlineData: { mimeType: mime, data: base64Data } }
       ]);
 
-      const transcribedText = result.response.text();
-      if (!transcribedText || transcribedText.length < 20) {
-        throw new Error("Tidak bisa mentranskripsi file ini. Pastikan ada suara yang jelas di dalamnya.");
-      }
-
-      return NextResponse.json({
-        success: true,
-        text: transcribedText,
-        type: isAudio ? "audio" : "video",
-      });
+      const text = result.response.text();
+      return NextResponse.json({ success: true, text, type: mime.startsWith('audio') ? "audio" : "video" });
     }
 
-    return NextResponse.json({ error: `Format file '${mime}' tidak didukung. Gunakan PDF, MP3, WAV, MP4, atau MOV.` }, { status: 400 });
+    throw new Error(`Format '${mime}' tidak didukung.`);
 
   } catch (err: any) {
-    console.error("Extractor Error:", err);
-    return NextResponse.json({ error: err.message || "Gagal memproses file" }, { status: 500 });
+    console.error(`[EXTRACTION_FINAL_ERROR] ${err.message}`);
+    return NextResponse.json({ error: err.message || "Gagal memproses" }, { status: 500 });
   }
 }
