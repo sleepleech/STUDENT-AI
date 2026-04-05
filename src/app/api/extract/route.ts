@@ -3,15 +3,7 @@ import { YoutubeTranscript } from 'youtube-transcript';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { generateWithFallback } from "@/lib/ai/provider";
 
-// Increase body size limit for Vercel
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: '10mb',
-    },
-  },
-};
-
+// Body size limits in App Router are handled by the platform (Vercel) automatically.
 export const maxDuration = 60; // seconds
 
 // ====== SMART CACHING (In-Memory) ======
