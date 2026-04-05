@@ -5,15 +5,18 @@ import { useRouter } from "next/navigation";
 import { ShieldCheck, Users, Search, Activity, MoreVertical, Trash2, CheckCircle2 } from "lucide-react";
 
 export default function AdminDashboard() {
-  const { user, users, toggleUserStatus, deleteUser } = useAuthStore();
+  const { user, users, toggleUserStatus, deleteUser, fetchAllProfiles } = useAuthStore();
   const router = useRouter();
 
   useEffect(() => {
-    // Basic protection inside component as secondary layer
+    // Sync data from cloud on mount
+    fetchAllProfiles();
+
+    // Basic protection
     if (user?.role !== "admin") {
       router.push("/dashboard");
     }
-  }, [user, router]);
+  }, [user, router, fetchAllProfiles]);
 
   if (user?.role !== "admin") return null;
 
@@ -108,7 +111,7 @@ export default function AdminDashboard() {
                   <td className="px-6 py-4">
                     <div className="flex items-center justify-end gap-2">
                       <button 
-                        onClick={() => toggleUserStatus(u.id)}
+                        onClick={() => toggleUserStatus(u.id, u.status)}
                         className="px-3 py-1 bg-accent hover:bg-accent/80 text-foreground rounded text-xs transition-colors"
                       >
                         {u.status === 'active' ? 'Suspend' : 'Activate'}

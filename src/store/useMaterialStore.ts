@@ -1,14 +1,14 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { createClient } from '@/lib/supabase/client';
 
-const TTL_MS = 24 * 60 * 60 * 1000; // 24 jam
+const supabase = createClient();
 
 export interface MaterialItem {
   id: string;
-  ownerId?: string; // Add ownerId for privacy
+  ownerId?: string;
   title: string;
   sourceType: 'pdf' | 'youtube' | 'audio' | 'video';
-  savedAt: number;
+  savedAt: string; // ISO string for cloud
   summary: any;
   flashcards: any[];
   quiz: any[];
@@ -20,72 +20,70 @@ interface MaterialState {
   activeMaterialId: string | null;
   materialHistory: MaterialItem[];
 
+  fetchMaterials: () => Promise<void>;
   setProcessing: (isProcessing: boolean, statusText?: string) => void;
   setActiveMaterial: (data: any, sourceType?: MaterialItem['sourceType']) => void;
   loadMaterial: (id: string) => void;
-  deleteMaterial: (id: string) => void;
-  clearExpired: () => void;
+  deleteMaterial: (id: string) => Promise<void>;
 }
 
-export const useMaterialStore = create<MaterialState>()(
-  persist(
-    (set) => ({
-      isProcessing: false,
-      statusText: "Idle",
-      activeMaterialId: null,
-      materialHistory: [],
+export const useMaterialStore = create<MaterialState>((set, get) => ({
+  isProcessing: false,
+  statusText: "Idle",
+  activeMaterialId: null,
+  materialHistory: [],
 
-      setProcessing: (isProcessing, statusText = "Processing") => set({
-        isProcessing,
-        statusText: isProcessing ? statusText : "Idle",
-      }),
+  setProcessing: (isProcessing, statusText = "Processing") => set({
+    isProcessing,
+    statusText: isProcessing ? statusText : "Idle",
+  }),
 
-      setActiveMaterial: (data, sourceType = 'pdf') => {
-        // Fallback import so we don't have circular dependency issues if any
-        const { useAuthStore } = require('./useAuthStore');
-        const currentUser = useAuthStore.getState().user;
+  /**
+   * Fetch from Supabase Cloud (Sync Desktop/Mobile)
+   */
+  fetchMaterials: async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
 
-        const newItem: MaterialItem = {
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          ownerId: currentUser?.id,
-          title: data.summary?.title || 'Materi Tanpa Judul',
-          sourceType,
-          savedAt: Date.now(),
-          summary: data.summary,
-          flashcards: data.flashcards || [],
-          quiz: data.quiz || [],
-        };
+    const { data, error } = await supabase
+      .from('materials')
+      .select('*, flashcards(*), quizzes(*)')
+      .eq('owner_id', user.id)
+      .order('created_at', { ascending: false });
 
-        set((state) => ({
-          materialHistory: [newItem, ...state.materialHistory].slice(0, 100), // increased from 10 to 100 to support multi-user history
-          activeMaterialId: newItem.id,
-        }));
-      },
-
-      loadMaterial: (id) => set({ activeMaterialId: id }),
-
-      deleteMaterial: (id) => set((state) => ({
-        materialHistory: state.materialHistory.filter((m) => m.id !== id),
-        activeMaterialId: state.activeMaterialId === id ? null : state.activeMaterialId,
-      })),
-
-      clearExpired: () => set((state) => ({
-        materialHistory: state.materialHistory.filter(
-          (m) => Date.now() - m.savedAt < TTL_MS
-        ),
-      })),
-    }),
-    {
-      name: 'nata-sensei-material-v2',
-      storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({
-        materialHistory: state.materialHistory,
-        activeMaterialId: state.activeMaterialId,
-      }),
+    if (!error && data) {
+      const items: MaterialItem[] = data.map(m => ({
+        id: m.id,
+        ownerId: m.owner_id,
+        title: m.title,
+        sourceType: m.source_type as any,
+        savedAt: m.created_at,
+        summary: m.summary,
+        flashcards: m.flashcards || [],
+        quiz: m.quizzes?.[0]?.questions || []
+      }));
+      set({ materialHistory: items });
     }
-  )
-);
+  },
 
-// ✅ Selector — gunakan ini di komponen untuk mendapatkan materi aktif
+  setActiveMaterial: (data, sourceType = 'pdf') => {
+    if (data.id) {
+       set({ activeMaterialId: data.id });
+       get().fetchMaterials(); 
+    }
+  },
+
+  loadMaterial: (id) => set({ activeMaterialId: id }),
+
+  deleteMaterial: async (id) => {
+    await supabase.from('materials').delete().eq('id', id);
+    set((state) => ({
+      materialHistory: state.materialHistory.filter((m) => m.id !== id),
+      activeMaterialId: state.activeMaterialId === id ? null : state.activeMaterialId,
+    }));
+  },
+}));
+
 export const selectActiveMaterial = (state: MaterialState): MaterialItem | null =>
   state.materialHistory.find((m) => m.id === state.activeMaterialId) ?? null;
+

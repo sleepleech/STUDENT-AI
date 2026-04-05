@@ -8,7 +8,10 @@ import { BookOpen, Flame, Trophy, Zap, FileText, Video, Trash2, Clock } from "lu
 import { motion } from "framer-motion";
 import { useAuthStore } from "@/store/useAuthStore";
 
-function timeAgo(timestamp: number): string {
+function timeAgo(dateInput: number | string): string {
+  const timestamp = typeof dateInput === 'string' ? new Date(dateInput).getTime() : dateInput;
+  if (isNaN(timestamp)) return "Waktu tidak valid";
+  
   const diff = Date.now() - timestamp;
   const mins = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
@@ -57,9 +60,9 @@ function MaterialCard({ item, onOpen, onDelete }: { item: MaterialItem; onOpen: 
 
 export default function Dashboard() {
   const router = useRouter();
-  const { materialHistory, loadMaterial, deleteMaterial, clearExpired } = useMaterialStore();
+  const { materialHistory, loadMaterial, deleteMaterial, fetchMaterials } = useMaterialStore();
   const { xp, streak, todayXP, totalMaterialsProcessed, checkDailyLogin } = useGameStore();
-  const { user } = useAuthStore();
+  const { user, syncProfile } = useAuthStore();
 
   const displayHistory = user?.role === 'admin'
     ? materialHistory
@@ -70,7 +73,11 @@ export default function Dashboard() {
   const xpProgress = getXPForNextBelt(xp);
 
   useEffect(() => {
-    clearExpired();
+    const init = async () => {
+      await syncProfile();
+      await fetchMaterials();
+    };
+    init();
     checkDailyLogin();
   }, []);
 

@@ -39,7 +39,7 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setMessage(null);
     setIsSaving(true);
     
@@ -58,24 +58,27 @@ export default function SettingsPage() {
     }
 
     // Process save
-    setTimeout(() => {
-      const updates: { avatar?: string; password?: string } = {};
+    try {
+      const updates: { avatar?: string; password?: string; name?: string } = {};
       if (avatarPreview && avatarPreview !== user.avatar) {
         updates.avatar = avatarPreview;
       }
       if (password) {
-        updates.password = password; // dummy store
+        updates.password = password; 
       }
       
-      updateProfile(updates);
+      await updateProfile(updates);
       setPassword("");
       setConfirmPassword("");
       setMessage({ type: 'success', text: 'Profil berhasil diperbarui!' });
-      setIsSaving(false);
       
       // Auto-hide success message
       setTimeout(() => setMessage(null), 3000);
-    }, 800);
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Gagal memperbarui profil' });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (

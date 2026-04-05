@@ -58,35 +58,63 @@ export async function POST(req: Request) {
 
     console.log("✅ AI Generation Successful!");
 
-    // Save to Supabase DB (if materialId provided)
-    if (materialId) {
-      const supabase = await createClient();
-      
-      const { error: matError } = await supabase.from('materials').update({
-        summary: JSON.stringify(summaryData),
-        is_processed: true
-      }).eq('id', materialId);
-      if (matError) console.error("Update material error:", matError);
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    let finalMaterialId = materialId;
 
-      if (flashcardsData.length > 0) {
-        const mappedFlashcards = flashcardsData.map((card: any) => ({
-          material_id: materialId,
-          question: card.question,
-          answer: card.answer
-        }));
-        await supabase.from('flashcards').insert(mappedFlashcards);
+    // Save to Supabase DB (Essential for Cloud Sync)
+    if (user) {
+      if (!finalMaterialId) {
+        // Create NEW material record
+        const { data: newMat, error: createError } = await supabase.from('materials').insert({
+          owner_id: user.id,
+          title: summaryData.title || "Materi Baru",
+          summary: summaryData,
+          is_processed: true,
+          source_type: "pdf" // default, updated by client if needed
+        }).select().single();
+        
+        if (createError) console.error("Create material error:", createError);
+        else finalMaterialId = newMat.id;
+      } else {
+        // Update EXISTING material record
+        const { error: matError } = await supabase.from('materials').update({
+          summary: summaryData,
+          is_processed: true
+        }).eq('id', finalMaterialId);
+        if (matError) console.error("Update material error:", matError);
       }
 
-      if (quizData.length > 0) {
-        await supabase.from('quizzes').insert({ material_id: materialId, questions: quizData });
+      if (finalMaterialId) {
+        // Insert Flashcards
+        if (flashcardsData.length > 0) {
+          const mappedFlashcards = flashcardsData.map((card: any) => ({
+            material_id: finalMaterialId,
+            question: card.question,
+            answer: card.answer
+          }));
+          await supabase.from('flashcards').insert(mappedFlashcards);
+        }
+
+        // Insert Quizzes
+        if (quizData.length > 0) {
+          await supabase.from('quizzes').insert({ 
+            material_id: finalMaterialId, 
+            questions: quizData 
+          });
+        }
+        console.log("💾 Saved to Database (Cloud Sync Active)!");
       }
-      
-      console.log("💾 Saved to Database!");
     }
 
     return NextResponse.json({
       success: true,
-      data: { summary: summaryData, flashcards: flashcardsData, quiz: quizData }
+      data: { 
+        id: finalMaterialId,
+        summary: summaryData, 
+        flashcards: flashcardsData, 
+        quiz: quizData 
+      }
     });
 
   } catch (error: any) {

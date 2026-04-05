@@ -9,25 +9,34 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
   const pathname = usePathname();
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, syncProfile } = useAuthStore();
+  const [isSyncing, setIsSyncing] = useState(true);
 
   const isPublicPage = pathname === "/" || pathname === "/about" || pathname === "/login";
 
   useEffect(() => {
-    // Bersihkan localStorage key lama yang bisa menyebabkan konflik state
+    const initAuth = async () => {
+      await syncProfile();
+      setIsSyncing(false);
+    };
+    initAuth();
+    
+    // Cleanup old storage
     try {
       localStorage.removeItem('nata-sensei-material');
     } catch {}
   }, []);
 
   useEffect(() => {
+    if (isSyncing) return; // Wait for cloud sync
+
     // Route guard
     if (!user && !isPublicPage) {
       router.push("/login");
     } else if (user && pathname === "/login") {
       router.push("/dashboard");
     }
-  }, [user, pathname, isPublicPage, router]);
+  }, [user, pathname, isPublicPage, router, isSyncing]);
 
   // Handle flash of unauthenticated state or simply render without sidebar
   if (isPublicPage) {
