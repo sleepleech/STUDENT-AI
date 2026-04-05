@@ -47,3 +47,35 @@ OUTPUT FORMAT:
   }
 ]
 `;
+
+// ✅ COMBINED Prompt: Generates ALL 3 in one single AI call (avoids Vercel 10s timeout)
+export const generateCombinedPrompt = (rawText: string, language: string = "Indonesian") => `
+${SYSTEM_PERSONA(language)}
+TASK: Analyze the following educational content and generate a complete learning module containing:
+1. A summary with key points and a cheat sheet
+2. EXACTLY 8 spaced-repetition flashcards for active recall
+3. EXACTLY 5 multiple-choice quiz questions to test understanding
+
+CONTENT: ${rawText}
+
+OUTPUT FORMAT (Strict JSON, no extra text):
+{
+  "summary": {
+    "title": "A catchy title for the module",
+    "summary": "A 2-3 paragraph comprehensive summary",
+    "key_points": ["point 1", "point 2", "point 3", "point 4"],
+    "cheat_sheet": "A short bulleted list of 5 ultimate rules to memorize"
+  },
+  "flashcards": [
+    { "question": "Clear question?", "answer": "Concise answer" }
+  ],
+  "quiz": [
+    {
+      "question": "The question text?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correct_answer": "The exact string of the correct option",
+      "explanation": "Why this answer is correct."
+    }
+  ]
+}
+`;
