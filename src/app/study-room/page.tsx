@@ -20,13 +20,12 @@ const tabs = [
 export default function StudyRoomPage() {
   const router = useRouter();
   const activeMaterial = useMaterialStore(selectActiveMaterial);
-  const { deleteMaterial, clearExpired } = useMaterialStore();
+  const { deleteMaterial } = useMaterialStore();
   const [tab, setTab] = useState<Tab>("summary");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    clearExpired();
   }, []);
 
   // Show empty state if no material loaded
