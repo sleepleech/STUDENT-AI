@@ -10,29 +10,47 @@ export interface User {
   role: 'admin' | 'student';
   status: 'active' | 'pending' | 'suspended';
   joined: string;
-  avatar?: string;
+  avatar?: string;   // maps to avatar_url in DB
   xp?: number;
   streak?: number;
+  beltRank?: string;
 }
 
 interface AuthState {
   user: User | null;
-  users: User[]; // Full list for admin
+  users: User[];
   isLoading: boolean;
-  
+
   // Cloud Actions
   login: (email: string, password?: string) => Promise<void>;
   register: (name: string, email: string, password?: string) => Promise<void>;
   logout: () => Promise<void>;
   syncProfile: () => Promise<void>;
   fetchAllProfiles: () => Promise<void>;
-  
+
   // Admin Actions
   toggleUserStatus: (id: string, currentStatus: string) => Promise<void>;
   deleteUser: (id: string) => Promise<void>;
 
   // Profile Actions
   updateProfile: (updates: { avatar?: string; password?: string; name?: string }) => Promise<void>;
+}
+
+// Helper: terjemahkan pesan error Supabase ke Bahasa Indonesia
+function translateError(msg: string): string {
+  if (msg.includes('Invalid login credentials'))
+    return 'Email atau password salah. Coba lagi.';
+  if (msg.includes('Email not confirmed'))
+    return 'Email belum dikonfirmasi. Hubungi admin untuk mengaktifkan akun.';
+  if (msg.includes('User already registered'))
+    return 'Email ini sudah terdaftar. Silakan login.';
+  if (msg.includes('Password should be at least'))
+    return 'Password minimal 6 karakter.';
+  if (msg.includes('Unable to validate email address'))
+    return 'Format email tidak valid.';
+  if (msg.includes('signup is disabled'))
+    return 'Pendaftaran sedang dinonaktifkan. Hubungi admin.';
+  return msg;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -45,50 +63,55 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!user) return;
 
     if (updates.password) {
-      await supabase.auth.updateUser({ password: updates.password });
+      const { error } = await supabase.auth.updateUser({ password: updates.password });
+      if (error) throw new Error(translateError(error.message));
     }
 
     const { error } = await supabase
       .from('profiles')
-      .update({ 
+      .update({
         name: updates.name || user.name,
-        avatar: updates.avatar
+        avatar_url: updates.avatar,
       })
       .eq('id', user.id);
 
-    if (!error) await get().syncProfile();
+    if (error) throw new Error(translateError(error.message));
+    await get().syncProfile();
   },
 
   /**
-   * Real Supabase Login with Admin Approval Guard
+   * Login dengan Supabase + Admin Approval Guard
    */
   login: async (email, password) => {
     set({ isLoading: true });
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password: password || '12345678',
       });
-      if (error) throw error;
+      if (error) throw new Error(translateError(error.message));
 
-      // Fetch profile from central database
+      // Ambil profil dari database
       const { data: profile, error: profErr } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', data.user.id)
         .single();
 
-      if (profErr) throw profErr;
+      if (profErr || !profile) {
+        await supabase.auth.signOut();
+        throw new Error('Profil akun tidak ditemukan. Hubungi admin.');
+      }
 
-      // --- ADMIN APPROVAL GUARD ---
+      // Guard: cek status akun (kecuali admin)
       if (profile.role !== 'admin') {
         if (profile.status === 'pending') {
           await supabase.auth.signOut();
-          throw new Error("Akun Anda sedang menunggu persetujuan Admin Berwenang.");
+          throw new Error('Akun Anda sedang menunggu persetujuan admin. Hubungi admin via WhatsApp.');
         }
         if (profile.status === 'suspended') {
           await supabase.auth.signOut();
-          throw new Error("Akun Anda telah dinonaktifkan oleh Admin.");
+          throw new Error('Akun Anda telah dinonaktifkan oleh admin.');
         }
       }
 
@@ -100,8 +123,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           role: profile.role as any,
           status: profile.status as any,
           joined: profile.joined_at,
-          xp: profile.xp,
-          streak: profile.streak,
+          xp: profile.xp ?? 0,
+          streak: profile.streak ?? 0,
+          avatar: profile.avatar_url,
+          beltRank: profile.belt_rank,
         },
         isLoading: false
       });
@@ -112,28 +137,34 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   /**
-   * Real Supabase Registration with Default 'pending' Status
+   * Registrasi dengan status 'pending' (butuh persetujuan admin)
    */
   register: async (name, email, password) => {
     set({ isLoading: true });
     try {
       const { data, error } = await supabase.auth.signUp({
-        email,
+        email: email.trim(),
         password: password || '12345678',
         options: { data: { name } }
       });
-      if (error) throw error;
-      if (!data.user) throw new Error("Gagal mendaftar.");
 
-      // Create central profile with PENDING status
-      const { error: profErr } = await supabase.from('profiles').insert({
+      if (error) throw new Error(translateError(error.message));
+      if (!data.user) throw new Error('Gagal mendaftar. Coba lagi.');
+
+      // Buat profil dengan status pending (butuh aktivasi admin)
+      const { error: profErr } = await supabase.from('profiles').upsert({
         id: data.user.id,
-        name,
-        email,
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
         role: 'student',
-        status: 'pending', // Wajib diatur admin untuk aktif
-      });
-      if (profErr) throw profErr;
+        status: 'pending',
+        joined_at: new Date().toISOString(),
+        xp: 0,
+        streak: 0,
+        belt_rank: 'White Belt',
+      }, { onConflict: 'id' });
+
+      if (profErr) throw new Error('Akun dibuat, namun gagal menyimpan profil. Hubungi admin.');
 
       set({ isLoading: false });
     } catch (err: any) {
@@ -144,40 +175,53 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: async () => {
     await supabase.auth.signOut();
-    set({ user: null });
+    set({ user: null, users: [] });
   },
 
   /**
-   * Keep Session in Sync (Auto-load on refresh)
+   * Sinkronisasi profil dari cloud (dipanggil saat page load)
    */
   syncProfile: async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) {
+        set({ user: null });
+        return;
+      }
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single();
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
 
-    if (profile) {
+      if (error || !profile) {
+        // Auth user ada tapi profil belum ada — mungkin belum confirmed
+        set({ user: null });
+        return;
+      }
+
       set({
         user: {
-          id: user.id,
+          id: authUser.id,
           name: profile.name,
           email: profile.email,
           role: profile.role as any,
           status: profile.status as any,
           joined: profile.joined_at,
-          xp: profile.xp,
-          streak: profile.streak,
+          xp: profile.xp ?? 0,
+          streak: profile.streak ?? 0,
+          avatar: profile.avatar_url,
+          beltRank: profile.belt_rank,
         }
       });
+    } catch {
+      set({ user: null });
     }
   },
 
   /**
-   * ADMIN: Fetch all registered users from Cloud
+   * ADMIN: Ambil semua user dari cloud
    */
   fetchAllProfiles: async () => {
     const { data, error } = await supabase
@@ -194,8 +238,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           role: p.role as any,
           status: p.status as any,
           joined: p.joined_at,
-          xp: p.xp,
-          streak: p.streak
+          xp: p.xp ?? 0,
+          streak: p.streak ?? 0,
+          avatar: p.avatar_url,
+          beltRank: p.belt_rank,
         }))
       });
     }
@@ -203,12 +249,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   toggleUserStatus: async (id, currentStatus) => {
     const next = currentStatus === 'active' ? 'suspended' : 'active';
-    await supabase.from('profiles').update({ status: next }).eq('id', id);
-    await get().fetchAllProfiles();
+    const { error } = await supabase.from('profiles').update({ status: next }).eq('id', id);
+    if (!error) await get().fetchAllProfiles();
   },
 
   deleteUser: async (id) => {
-    await supabase.from('profiles').delete().eq('id', id);
-    await get().fetchAllProfiles();
+    // Hapus profil dari tabel profiles
+    const { error } = await supabase.from('profiles').delete().eq('id', id);
+    if (!error) await get().fetchAllProfiles();
   }
 }));
