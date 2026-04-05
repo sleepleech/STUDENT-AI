@@ -128,15 +128,21 @@ export default function LoginPage() {
                 </div>
               </h1>
 
-              <div className="flex items-center gap-1 text-sm text-white font-medium mb-8 drop-shadow-md">
-                {isLoginView ? "Don't have an Account?" : "Already A Member?"}
-                <button 
-                  type="button"
-                  onClick={() => setIsLoginView(!isLoginView)}
-                  className="text-orange-400 font-bold hover:text-orange-300 transition-colors underline decoration-orange-400/30 underline-offset-4 ml-1 drop-shadow-md"
-                >
-                  {isLoginView ? "Create Account" : "Log In"}
-                </button>
+              <div className="flex flex-col gap-4 text-sm text-white font-medium mb-8 drop-shadow-md">
+                <div className="flex items-center gap-1">
+                  <span>Belum punya Akun?</span>
+                  <a 
+                    href="https://wa.me/085143820659?text=Halo%20Admin%20Nata%20Sensei%2C%20saya%20tertarik%20untuk%20berlangganan%20akun%20Premium." 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="text-orange-400 font-bold hover:text-orange-300 transition-colors underline decoration-orange-400/30 underline-offset-4 ml-1"
+                  >
+                    Daftar Akun ke Admin (WA)
+                  </a>
+                </div>
+                <p className="text-[10px] text-white/50 italic italic uppercase tracking-wider">
+                  *Akun akan dibuatkan oleh Admin setelah pembayaran dikonfirmasi.
+                </p>
               </div>
 
               {errorText && (
