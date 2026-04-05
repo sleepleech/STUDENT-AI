@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Sidebar } from "./sidebar";
 import { Navbar } from "./navbar";
 import { useAuthStore } from "@/store/useAuthStore";
+import { cn } from "@/lib/utils";
 
 export function MainLayout({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
@@ -20,12 +21,12 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
       setIsSyncing(false);
     };
     initAuth();
-    
+
     // Cleanup old storage
     try {
       localStorage.removeItem('nata-sensei-material');
-    } catch {}
-  }, []);
+    } catch { }
+  }, [syncProfile]);
 
   useEffect(() => {
     if (isSyncing) return; // Wait for cloud sync
@@ -48,13 +49,13 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   }
 
   // Prevent rendering protected layout if not authenticated
-  if (!user) return null;
+  if (!user && !isSyncing) return null;
 
   return (
     <div className="flex min-h-screen bg-background font-sans text-foreground overflow-x-hidden">
       {/* Mobile Backdrop */}
       {open && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden transition-opacity duration-300"
           onClick={() => setOpen(false)}
         />
@@ -80,4 +81,3 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
-import { cn } from "@/lib/utils";
