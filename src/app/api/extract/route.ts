@@ -143,7 +143,8 @@ Beri judul: "Rekonstruksi Materi: ${title}"`;
       try {
         const arrayBuffer = await file.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
-        const pdfParse = require('pdf-parse');
+        // Use lib path directly to avoid pdf-parse test file that references DOMMatrix (browser-only API)
+        const pdfParse = require('pdf-parse/lib/pdf-parse.js');
         const pdfData = await pdfParse(buffer);
         const text = pdfData.text || '';
         if (!text.trim()) throw new Error('PDF tidak terbaca.');
