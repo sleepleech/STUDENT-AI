@@ -138,16 +138,39 @@ Beri judul: "Rekonstruksi Materi: ${title}"`;
     const mime = file.type;
     console.log(`📁 Processing file: ${file.name} [${mime}]`);
 
-    // PDF 
+    // PDF — using pdfjs-dist (serverless-safe, no browser-only APIs)
     if (mime === 'application/pdf') {
       try {
         const arrayBuffer = await file.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        // Use lib path directly to avoid pdf-parse test file that references DOMMatrix (browser-only API)
-        const pdfParse = require('pdf-parse/lib/pdf-parse.js');
-        const pdfData = await pdfParse(buffer);
-        const text = pdfData.text || '';
-        if (!text.trim()) throw new Error('PDF tidak terbaca.');
+
+        // Dynamically import pdfjs-dist legacy build (Node.js compatible)
+        const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+
+        // Disable worker for server-side usage
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+
+        const loadingTask = pdfjsLib.getDocument({
+          data: new Uint8Array(arrayBuffer),
+          useWorkerFetch: false,
+          isEvalSupported: false,
+          useSystemFonts: true,
+        });
+
+        const pdfDoc = await loadingTask.promise;
+        const numPages = pdfDoc.numPages;
+        let fullText = '';
+
+        for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+          const page = await pdfDoc.getPage(pageNum);
+          const content = await page.getTextContent();
+          const pageText = content.items
+            .map((item: any) => item.str || '')
+            .join(' ');
+          fullText += pageText + '\n';
+        }
+
+        const text = fullText.trim();
+        if (!text) throw new Error('PDF tidak mengandung teks yang bisa dibaca (mungkin PDF berbasis gambar/scan).');
         return NextResponse.json({ success: true, text, type: "pdf" });
       } catch (err: any) {
         throw new Error(`Gagal membaca PDF: ${err.message}`);
